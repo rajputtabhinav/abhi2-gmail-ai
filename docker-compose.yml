@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: abhi2
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d abhi2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run migrate --workspace apps/backend && npm run dev --workspace apps/backend"
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/abhi2
+      REDIS_URL: redis://redis:6379
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "4000:4000"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run worker --workspace apps/backend"
+    env_file:
+      - ./apps/backend/.env
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/abhi2
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - .:/app
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev --workspace apps/frontend -- --hostname 0.0.0.0"
+    env_file:
+      - ./apps/frontend/.env.local
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:4000
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
